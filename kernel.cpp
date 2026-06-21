@@ -11,14 +11,64 @@
 int terminal_column = 1;
 int terminal_row = 1;
 
+// test
+
 // 15 - white
 // 86 - pink :3 adsfijv ajjuygvhashyhrbasggyftsv
 int color = 15;
 int color2 = 15;
 
-int total_apps = 3;
+int total_apps = 4;
 
 static unsigned char* framebuffer = (unsigned char*)0xa0000;
+
+// getting current time
+static inline void outb(uint16_t port, uint8_t value)
+{
+    asm volatile ("outb %0, %1"
+                  :
+                  : "a"(value), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port)
+{
+    uint8_t ret;
+
+    asm volatile ("inb %1, %0"
+                  : "=a"(ret)
+                  : "Nd"(port));
+
+    return ret;
+}
+
+uint8_t read_cmos(uint8_t reg) {
+    outb(0x70, reg);
+    return inb(0x71);
+}
+
+struct RTC_Time {
+    uint8_t second;
+    uint8_t minute;
+    uint8_t hour;
+    uint8_t day;
+    uint8_t month;
+    uint8_t year;
+};
+
+RTC_Time read_rtc() {
+    RTC_Time t;
+    t.second = read_cmos(0x00);
+    t.minute = read_cmos(0x02);
+    t.hour = read_cmos(0x04);
+    t.day = read_cmos(0x07);
+    t.month = read_cmos(0x08);
+    t.year = read_cmos(0x09);
+    return t;
+}
+
+uint8_t bcd_to_bin(uint8_t bcd) {
+    return ((bcd >> 4) * 10) + (bcd & 0x0F);
+}
 
 // coooooooooooooooooooooooooooooooooooooooooooooooooooooooooool functions
 
@@ -262,6 +312,21 @@ Bitmap about_app_pic = {
     5,
     5,
     about_app_pic_data
+};
+
+// calculator app
+unsigned char calc_app_pic_data[] = {
+    0, 0, 0, 0, 0,
+    0, 0, 15, 0, 0,
+    0, 15, 15, 15, 0,
+    0, 0, 15, 0, 0,
+    0, 0, 0, 0, 0
+};
+
+Bitmap calc_app_pic = {
+    5,
+    5,
+    calc_app_pic_data
 };
 
 // not mine !!!1111  y09!!* 0j8yt0q0yqiuvgfsiflvsik
@@ -674,6 +739,7 @@ void terminal_print(const char* text, unsigned char col) {
 int shift_pressed = 0;
 
 // okay ngl i dont understand ts at all :(
+/*
 static inline unsigned char inb(unsigned short port) {
     unsigned char result;
 
@@ -683,7 +749,7 @@ static inline unsigned char inb(unsigned short port) {
 
     return result;
 }
-
+*/
 // yup this function got written by chatgpt aint no way im writing this
 char scancode_to_ascii(unsigned char scancode) {
     static char normal_map[128] = {
@@ -766,6 +832,7 @@ void desktop_frame() {
     if (desktop_app_hover == 1) {draw_bitmap(30, 60, desktop_app_pic, 5);} else {draw_bitmap(30, 60,  desktop_app_pic, 4);}
     if (desktop_app_hover == 2) {draw_bitmap(60, 60, terminal_app_pic, 5);} else {draw_bitmap(60, 60, terminal_app_pic, 4);}
     if (desktop_app_hover == 3) {draw_bitmap(90, 60, about_app_pic, 5);} else {draw_bitmap(90, 60, about_app_pic, 4);}
+    if (desktop_app_hover == 4) {draw_bitmap(120, 60, calc_app_pic, 5);} else {draw_bitmap(120, 60, calc_app_pic, 4);}
     
     draw_rect_fill(0, 0, WIDTH, 30, 54);
     draw_string(5, 5, "Navigate with WSAD or number (1-0) keys.", 0);
@@ -774,11 +841,12 @@ void desktop_frame() {
     if (desktop_app_hover == 1) {draw_string_centered(WIDTH/2, HEIGHT-15, "Desktop (you're currently in it)", 0);}
     if (desktop_app_hover == 2) {draw_string_centered(WIDTH/2, HEIGHT-15, "Terminal", 0);}
     if (desktop_app_hover == 3) {draw_string_centered(WIDTH/2, HEIGHT-15, "About page", 0);}
+    if (desktop_app_hover == 4) {draw_string_centered(WIDTH/2, HEIGHT-15, "Calculator", 0);}
 }
 
 // terminal command handling (is it the correct way to write handling? idk im to lazy to check it yet im not lazy enough to write this long ass comment)
 
-// shell functions (not mine)
+// shell functions
 char* skip_spaces(char* s) {
     while (*s == ' ') s++;
     return s;
@@ -880,6 +948,17 @@ void bad_apple() {
     }
 }
 
+void shell_time(uint8_t n) {
+    char s[3];
+    s[0] = '0' + (n / 10);
+    s[1] = '0' + (n % 10);
+    s[2] = 0;
+
+    terminal_print(s, 15);
+}
+
+int time_zone = 2;
+
 // shell check (mine)
 void shell_command_check(char* input) {
     char cmd[64];
@@ -901,6 +980,9 @@ void shell_command_check(char* input) {
         terminal_print("- wallpaper: changes a wallpaper (1-2)\n", color2);
         terminal_print("ex: wallpaper 1\n", color2);
         terminal_print("- clear: clears the screen\n", color2);
+        terminal_print("- time: tells current time (TZ+2 h)\n", color2);
+        terminal_print("- set_time_zone: sets TZ (auto +2)\n", color2);
+        terminal_print("ex: set_time_zone 0\n", color2);
     }
     else if (strcmp(cmd, "echo")) {
         terminal_print(args, color2);
@@ -943,6 +1025,21 @@ void shell_command_check(char* input) {
         terminal_column = 1;
         terminal_row = 1;
         clear_screen(color);
+    } else if (strcmp(cmd, "time")) {
+        RTC_Time t = read_rtc();
+
+        t.second = bcd_to_bin(t.second);
+        t.minute = bcd_to_bin(t.minute);
+        t.hour = bcd_to_bin(t.hour);
+
+        shell_time(t.hour+time_zone);
+        terminal_print(":", 15);
+        shell_time(t.minute);
+        terminal_print(":", 15);
+        shell_time(t.second);
+        terminal_print("\n", 15);
+    } else if (strcmp(cmd, "set_time_zone")) {
+        time_zone = stoi(args);
     } else {
         terminal_print("Invalid command D:\n", 40);
     }
@@ -1029,6 +1126,18 @@ void about_popup() {
     draw_string_centered(WIDTH/2, HEIGHT/2+18, "Press enter to go back to the desktop.", 15);
 }
 
+// calculator
+
+void calc_popup() {
+    color = 0;
+    clear_screen(color);
+    color2 = 15;
+    print_logo();
+    // color - bg
+    // color2 - fg
+    terminal_print("$ ", 10);
+}
+
 // main
 extern "C" void main() {
     // delay to make sure everything loades
@@ -1099,6 +1208,7 @@ extern "C" void main() {
             } else if (state == 0) {
                 if (desktop_app_hover == 2) {state = 1; terminal_popup();}
                 if (desktop_app_hover == 3) {state = 2; about_popup();}
+                if (desktop_app_hover == 4) {state = 1; terminal_popup();}
             } else if (state == 2) {
                 state = 0;
                 desktop_frame();
